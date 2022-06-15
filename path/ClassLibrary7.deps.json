@@ -10,6 +10,7 @@
       "ClassLibrary7/1.0.0": {
         "dependencies": {
           "DocX": "2.1.0",
+          "Independentsoft.Office.Odf": "2.0.670",
           "Microsoft.Office.Interop.Word": "15.0.4797.1003",
           "NETStandard.Library": "2.0.3",
           "Newtonsoft.Json": "13.0.1",
@@ -29,6 +30,14 @@
           "lib/net40/Xceed.Words.NET.dll": {
             "assemblyVersion": "2.1.0.0",
             "fileVersion": "2.1.0.0"
+          }
+        }
+      },
+      "Independentsoft.Office.Odf/2.0.670": {
+        "runtime": {
+          "Lib/netstandard2.0/Independentsoft.Office.Odf.dll": {
+            "assemblyVersion": "2.0.670.1",
+            "fileVersion": "2.0.670.1"
           }
         }
       },
@@ -84,6 +93,13 @@
       "sha512": "sha512-nuOq9M/1crnv53WzifXCdObqGPRCylDsByxMUA8HkW4IFZn1k3E7CgoFRfWdMJjbKtLYqY00tvdLUCAN9gsjTg==",
       "path": "docx/2.1.0",
       "hashPath": "docx.2.1.0.nupkg.sha512"
+    },
+    "Independentsoft.Office.Odf/2.0.670": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-AIr/DEA4Q3qa3UHgDcZFIR+TVmwx7SwC9JpuAzjM4FdwPWVkLOsyQQ2qoLD51YWKfT49bVFojWyZkNnib5yWRg==",
+      "path": "independentsoft.office.odf/2.0.670",
+      "hashPath": "independentsoft.office.odf.2.0.670.nupkg.sha512"
     },
     "Microsoft.NETCore.Platforms/1.1.0": {
       "type": "package",

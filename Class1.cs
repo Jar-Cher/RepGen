@@ -15,17 +15,17 @@ namespace ClassLibrary7
 
         private static ReplaceData _replaceData;
 
-        public enum ListType
-        {
-            Numbered,
-            Bulleted
-        }
+        private static DocX _document;
+
+        private static string _inputAddress;
+
+        private static string _outputAddress;
 
         class ReplaceData
         {
             public Dictionary<string, string> ReplacePatterns { get; }
 
-            public string[] ReplacePictures { get; }
+            public Dictionary<string, string> ReplacePictures { get; }
 
             public Dictionary<string, string[]> ReplaceTableColumns { get; }
 
@@ -35,7 +35,7 @@ namespace ClassLibrary7
 
             public Dictionary<string, string[]> ReplaceBulletedLists { get; }
 
-            public ReplaceData(Dictionary<string, string> replacePatterns, string[] replacePictures, Dictionary<string, string[]> replaceTableColumns, Dictionary<string, string[][]> replaceTables, Dictionary<string, string[]> replaceNumberedLists, Dictionary<string, string[]> replaceBulletedLists)
+            public ReplaceData(Dictionary<string, string> replacePatterns, Dictionary<string, string> replacePictures, Dictionary<string, string[]> replaceTableColumns, Dictionary<string, string[][]> replaceTables, Dictionary<string, string[]> replaceNumberedLists, Dictionary<string, string[]> replaceBulletedLists)
             {
                 ReplacePatterns = replacePatterns;
                 ReplacePictures = replacePictures;
@@ -46,7 +46,7 @@ namespace ClassLibrary7
             }
         }
 
-        static private void ReplaceLists(Document document, Dictionary<string, string[]> lists, ListItemType listType)
+        private static void ReplaceLists(Dictionary<string, string[]> lists, ListItemType listType)
         {
             if (lists == null)
             {
@@ -59,37 +59,65 @@ namespace ClassLibrary7
                 {
                     continue;
                 }
-
-                List<int> marks = document.FindAll("{<" + i.Key + ">}");
-                marks.ForEach(element =>
+                _document.SaveAs(_outputAddress);
+                _document = DocX.Load(_outputAddress);
+                List<int> marks = _document.FindAll("{<" + i.Key + ">}");
+                int marksId = 0;
+                while (marksId < marks.Count)
                 {
-                    var newList = document.AddList(i.Value[0], 0, listType, 1);
+                    int element = marks[marksId]+10;
+                    
+                    var newList = _document.AddList(i.Value[0], 0, listType, 1);
                     for (int j = 0; j < i.Value.Length - 1; ++j)
                     {
-                        document.AddListItem(newList, i.Value[j + 1]);
+                        _document.AddListItem(newList, i.Value[j + 1]);
                     }
-
+                    //Console.WriteLine("Got it");
                     try
-                    {
-                        document.InsertList(element, newList);
+                    { 
+                        _document.InsertList(element, newList);
                     }
                     catch (System.ArgumentOutOfRangeException)
                     {
-
                     }
-                });
-                document.ReplaceText("{<" + i.Key + ">}", "");
+                    marks = _document.FindAll("{<" + i.Key + ">}");
+                    ++ marksId;
+                }
+                // Workaround to fix incorrect indexes
+                _document.SaveAs(_outputAddress);
+                _document = DocX.Load(_outputAddress);
+                _document.ReplaceText("{<" + i.Key + ">}", "");
             }
         }
 
         public static void Replace(string replaceData, string inputAddress = "Input.docx", string outputAddress = "Output.docx")
         {
-            _replaceData = JsonConvert.DeserializeObject<ReplaceData>(replaceData);
+            _inputAddress = inputAddress;
+            _outputAddress = outputAddress;
 
-            // Load a document.
-            var document = DocX.Load(inputAddress);
-            // Check if all the replace patterns are used in the loaded document.
-            if ((document.FindUniqueByPattern(@"{<(.+)>}", RegexOptions.IgnoreCase).Count > 0) && (_replaceData != null))
+            try
+            {
+                _replaceData = JsonConvert.DeserializeObject<ReplaceData>(replaceData);
+            }
+            catch (JsonReaderException e)
+            {
+                Console.Write(e);
+                return;
+            }
+
+            // Load a _document.
+            try
+            {
+                _document = DocX.Load(inputAddress);
+            }
+            catch (InvalidOperationException e)
+            {
+                Console.Write(e);
+                return;
+            }
+
+            // Check if all the replace patterns are used in the loaded _document.
+            if ((_document.FindUniqueByPattern(@"{<(.+)>}", RegexOptions.IgnoreCase).Count > 0) && (_replaceData != null))
             {
                 // Take care of tables
                 if (_replaceData.ReplaceTables != null)
@@ -103,7 +131,7 @@ namespace ClassLibrary7
                             continue;
                         }
 
-                        var table = document.AddTable(tableArray.GetLength(0), tableArray.Max(row => row.Length));
+                        var table = _document.AddTable(tableArray.GetLength(0), tableArray.Max(row => row.Length));
 
                         for (int j = 0; j < tableArray.GetLength(0); ++j)
                         {
@@ -113,125 +141,152 @@ namespace ClassLibrary7
                             }
                         }
 
-                        document.ReplaceTextWithObject("{<" + i.Key + ">}", table, false,
-                            RegexOptions.IgnoreCase);
+                        _document.ReplaceTextWithObject("{<" + i.Key + ">}", table, false, RegexOptions.IgnoreCase);
                     }
                 }
 
                 // Take care of mutable table columns
-                var mutableTables = document.Tables.FindAll(tab => 
-                    tab.Rows.Find(cell => cell.Paragraphs.ToList().Find(par => Regex.IsMatch(par.Text, @"{<TableColumns\.(.+)>}")) != null) != null);
-
-                for (int i = 0; i < mutableTables.Count; ++i)
+                if (_replaceData.ReplaceTableColumns != null && _replaceData.ReplaceTableColumns.Any())
                 {
-                    int j = 0;
-                    while (j < mutableTables[i].RowCount)
-                    {
-                        var mutableCells = mutableTables[i].Rows[j].Cells.FindAll(cell =>
+                    var mutableTables = _document.Tables.FindAll(tab =>
+                        tab.Rows.Find(cell =>
                             cell.Paragraphs.ToList().Find(par => Regex.IsMatch(par.Text, @"{<TableColumns\.(.+)>}")) !=
-                            null);
+                            null) != null);
 
-                        if (mutableCells.Any())
+                    for (int i = 0; i < mutableTables.Count; ++i)
+                    {
+                        int j = 0;
+                        while (j < mutableTables[i].RowCount)
                         {
-                            //Console.Write("Gotcha");
-                            var keysToReplace = _replaceData.ReplaceTableColumns.Keys.ToList().FindAll(key =>
-                                mutableCells.Find(cell =>
-                                    cell.Paragraphs.ToList().Find(par => Regex.IsMatch(par.Text, key)) !=
-                                    null) != null);
+                            var mutableCells = mutableTables[i].Rows[j].Cells.FindAll(cell =>
+                                cell.Paragraphs.ToList()
+                                    .Find(par => Regex.IsMatch(par.Text, @"{<TableColumns\.(.+)>}")) !=
+                                null);
 
-                            int maxLen = 0;
-                            for (int k = 0; k < keysToReplace.Count; ++k)
+                            if (mutableCells.Any())
                             {
-                                int newLen = _replaceData.ReplaceTableColumns[keysToReplace[k]].Length;
-                                if (newLen > maxLen)
+                                //Console.Write("Gotcha");
+                                var keysToReplace = _replaceData.ReplaceTableColumns.Keys.ToList().FindAll(key =>
+                                    mutableCells.Find(cell =>
+                                        cell.Paragraphs.ToList().Find(par => Regex.IsMatch(par.Text, key)) !=
+                                        null) != null);
+
+                                int maxLen = 0;
+                                for (int k = 0; k < keysToReplace.Count; ++k)
                                 {
-                                    maxLen = newLen;
+                                    int newLen = _replaceData.ReplaceTableColumns[keysToReplace[k]].Length;
+                                    if (newLen > maxLen)
+                                    {
+                                        maxLen = newLen;
+                                    }
+
+                                    if (newLen == 0)
+                                    {
+                                        _replaceData.ReplaceTableColumns[keysToReplace[k]] = _replaceData
+                                            .ReplaceTableColumns[keysToReplace[k]]
+                                            .Concat(new string[] {"{<" + keysToReplace[k] + ">}"}).ToArray();
+                                        //Console.Write(_replaceData.ReplaceTableColumns[keysToReplace[k]].Length);
+                                    }
                                 }
 
-                                if (newLen == 0)
+                                for (int k = 0; k < maxLen - 1; ++k)
                                 {
-                                    _replaceData.ReplaceTableColumns[keysToReplace[k]] = _replaceData.ReplaceTableColumns[keysToReplace[k]].Concat(new string[] { "{<" + keysToReplace[k] + ">}" }).ToArray();
-                                    //Console.Write(_replaceData.ReplaceTableColumns[keysToReplace[k]].Length);
+                                    //Console.Write(k);
+                                    mutableTables[i].InsertRow(mutableTables[i].Rows[j], j + 1, true);
+
+
+                                    // merge the rest
+                                }
+
+                                for (int k = 0; k < maxLen; ++k)
+                                {
+                                    for (int y = 0; y < keysToReplace.Count; ++y)
+                                    {
+                                        int cappedIndex =
+                                            Math.Min(_replaceData.ReplaceTableColumns[keysToReplace[y]].Length - 1, k);
+                                        mutableTables[i].Rows[j].ReplaceText("{<" + keysToReplace[y] + ">}",
+                                            _replaceData.ReplaceTableColumns[keysToReplace[y]][cappedIndex], false,
+                                            RegexOptions.IgnoreCase);
+                                    }
+                                    ++j;
                                 }
                             }
-
-                            for (int k = 0; k < maxLen-1; ++k)
+                            else
                             {
-                                //Console.Write(k);
-                                mutableTables[i].InsertRow(mutableTables[i].Rows[j], j+1, true);
-                                
-                                
-                                // merge the rest
-                            }
-
-                            for (int k = 0; k < maxLen; ++k)
-                            {
-                                for (int y = 0; y < keysToReplace.Count; ++y)
-                                {
-                                    int cappedIndex = Math.Min(_replaceData.ReplaceTableColumns[keysToReplace[y]].Length - 1, k);
-                                    mutableTables[i].Rows[j].ReplaceText("{<" + keysToReplace[y] + ">}", _replaceData.ReplaceTableColumns[keysToReplace[y]][cappedIndex], false, RegexOptions.IgnoreCase);
-                                }
                                 ++j;
                             }
                         }
-                        else
+                    }
+                }
+
+                // Take care of unifying table cells
+                for (int tableId = 0; tableId < _document.Tables.Count; ++tableId)
+                {
+                    var marks = new Dictionary<int, int>();
+                    for (int rowId = 0; rowId < _document.Tables[tableId].Rows.Count; ++rowId)
+                    {
+                        for (int cellId = 0; cellId < _document.Tables[tableId].Rows[rowId].Cells.Count; ++cellId)
                         {
-                            ++j;
+                            var mark = Regex.Match(string.Join("\n", 
+                                _document.Tables[tableId].Rows[rowId].Cells[cellId].Paragraphs.ToList().Select(p => p.Text)), 
+                                @"{<ColumnsMerge>}");
+                            if (mark.Success)
+                            {
+                                if (marks.ContainsKey(cellId))
+                                {
+                                    _document.Tables[tableId].MergeCellsInColumn(cellId, marks[cellId], rowId);
+                                    marks.Remove(cellId);
+                                }
+                                else
+                                {
+                                    marks[cellId] = rowId;
+                                }
+                            }
                         }
                     }
                 }
-                
-                // Take care of lists
-                ReplaceLists(document, _replaceData.ReplaceNumberedLists, ListItemType.Numbered);
                 // Workaround to fix incorrect indexes
-                if (_replaceData.ReplaceNumberedLists != null)
-                {
-                    document.SaveAs(outputAddress);
-                    document = DocX.Load(outputAddress);
+                _document.SaveAs(_outputAddress);
+                _document = DocX.Load(_outputAddress);
+                _document.ReplaceText("{<ColumnsMerge>}", "");
 
-                    foreach (var i in _replaceData.ReplaceNumberedLists)
-                    {
-                        document.ReplaceText("{<" + i.Key + ">}", "");
-                    }
-                }
-                ReplaceLists(document, _replaceData.ReplaceBulletedLists, ListItemType.Bulleted);
-                if (_replaceData.ReplaceBulletedLists != null)
-                {
-                    document.SaveAs(outputAddress);
-                    document = DocX.Load(outputAddress);
-
-                    foreach (var i in _replaceData.ReplaceBulletedLists)
-                    {
-                        document.ReplaceText("{<" + i.Key + ">}", "");
-                    }
-                }
+                // Take care of lists
+                ReplaceLists(_replaceData.ReplaceNumberedLists, ListItemType.Numbered);
+                
+                ReplaceLists(_replaceData.ReplaceBulletedLists, ListItemType.Bulleted);
 
                 // Take care of pictures
-                for (int i = 0; i < _replaceData.ReplacePictures.Length; ++i)
+                if (_replaceData.ReplacePictures != null && _replaceData.ReplacePictures.Any())
                 {
-                    try
+                    foreach (var i in _replaceData.ReplacePictures)
                     {
-                        var image = document.AddImage(_replaceData.ReplacePictures[i]);
-                        var picture = image.CreatePicture();
-                        // Do the replacement of all the found tags with the specified image and ignore the case when searching for the tags.
-                        document.ReplaceTextWithObject("{<" + _replaceData.ReplacePictures[i] + ">}", picture, false,
-                            RegexOptions.IgnoreCase);
-                    }
-                    catch (System.IO.FileNotFoundException)
-                    {
-                        
+                        try
+                        {
+                            var image = _document.AddImage(i.Value);
+                            var picture = image.CreatePicture();
+                            // Do the replacement of all the found tags with the specified image and ignore the case when searching for the tags.
+                            _document.ReplaceTextWithObject("{<" + i.Key + ">}", picture, false,
+                                RegexOptions.IgnoreCase);
+                        }
+                        catch (FileNotFoundException)
+                        {
+
+                        }
                     }
                 }
 
                 // Take care of text
-                for (int i = 0; i < _replaceData.ReplacePatterns.Count; ++i)
+                if (_replaceData.ReplacePatterns != null)
                 {
-                    document.ReplaceText("{<(.+)>}", ReportGenerator.ReplaceString, false, RegexOptions.IgnoreCase);
+                    foreach (var i in _replaceData.ReplacePatterns)
+                    {
+                        _document.ReplaceText("{<" + i.Key + ">}", i.Value, false, RegexOptions.IgnoreCase);
+                    }
                 }
-                // Save this document to disk.
-                //document.UpdateFields();
+                //_document.UpdateFields();
             }
-            document.SaveAs(outputAddress);
+            // Save this _document to disk.
+            _document.SaveAs(outputAddress);
         }
         private static string ReplaceString(string findStr)
         {
